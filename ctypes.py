@@ -1,10 +1,10 @@
 from enum import Enum
 
 class MouseButton(Enum):
-    LeftButton   = 0x0000001F
-    MiddleButton = 0x000007C0
-    RightButton  = 0x0001F000
-    Wheel        = 0x007C0000
+    LeftButton   = 0x00001F
+    MiddleButton = 0x0007C0
+    RightButton  = 0x01F000
+    Wheel        = 0x7C0000
 
 class MouseAction(Enum):
     Released      = 0x01
@@ -17,6 +17,7 @@ class CheckState(Enum):
     Unchecked        = 0
     PartiallyChecked = 1
     Checked          = 2
+
 class Corner(Enum):
     TopLeftCorner     = 0x0
     TopRightCorner    = 0x1

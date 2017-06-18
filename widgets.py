@@ -1,28 +1,24 @@
 import curses
+#import locale
+#locale.setlocale(locale.LC_ALL, '')
+
 from PyQt5.QtCore import (QObject,
                             pyqtSlot,
                             pyqtSignal,
                             QTimerEvent,
                             QEvent)
 from event import *
-#from core import core.CApplication, CScreen
 from ctypes import WindowType, MouseButton
+import core
+from utils.log import *
+from utils import colored_traceback
 
 import sys
 import re
 import weakref
 import collections
-sys.path.append('/home/louis/project')
-
-import core
-#from core import core.CApplication
-from Qc.Extra import *
 from functools import wraps
 
-
-import locale
-
-locale.setlocale(locale.LC_ALL, '')
 
 def iterfy(iterable):
     if isinstance(iterable, str):
@@ -44,8 +40,10 @@ def dec(f):
     return wrapper
 
 class CWidget(QObject):
+
     _instances = []
     windowTitleChanged = pyqtSignal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.__class__._instances.append(weakref.proxy(self))
@@ -65,6 +63,9 @@ class CWidget(QObject):
         self.setGeometry(0, 0, *self.baseSize)
 
     def __cursesRefresh(self):
+        """
+        """
+        DEBUG("")
 # >>> DEBUG
         if 1:
             ERROR("{} boxed {} geo {}| parent {} ".format(self.objectName(),
@@ -72,73 +73,66 @@ class CWidget(QObject):
                                                         self.geometry,
                                                         self.parent().objectName()))
             pos = tuple(reversed(self._win.getparyx()))
-
             size = tuple(reversed(self._win.getmaxyx()))
-            geo = pos + size
-            WARNING("curses: x {} y {} w {} h {}".format(*geo))
+            WARNING("curses: x {} y {} w {} h {}".format(*(pos + size)))
 
-        #TODO: figure why the below line work and not the 2nd below (Not showing menu)
-        #ERROR(">>>>>>>>>>>>>>>> WIN TOUCHED {}".format(self._win.is_wintouched()))
-        #if self.isVisible() and self._win.is_wintouched():
+        if self.parent() is core.CApplication.instance():
+            return
         if self.isVisible():
             if self.boxed:
-                side_char                = '│' # '|'
-                line_char                = '─' # '-'
-                top_left_corner_char     = '┌' #'+'
-                top_right_corner_char    = '┐'#'+'
-                bottom_left_corner_char  = '└'#'+'
-                bottom_right_corner_char = '┘'#'+'
-                crossing_four_widget     = '╬'
-                # top line
-                self._win.addstr(0, 1, line_char * (self.width - 2))
-                # bottom line
-                self._win.addstr(self.height - 1, 1, line_char * (self.width - 2))
-
-
-                for i in range(1, self.height - 1):
-                    # Left side
-                    self._win.addstr(i, 0, side_char)
-                    # Right side
-                    self._win.addstr(i, self.width - 1, side_char)
-
-                # Top Left corner
-                self._win.addstr(0, 0, top_left_corner_char)
-                # Top Right corner
-                self._win.addstr(0, self.width - 1, top_right_corner_char)
-                ## Bottom Left corner
-                self._win.addstr(self.height - 1, 0, bottom_left_corner_char)
-                ## Bottom Right corner
-                try:
-                    #NOTE:
-                    # If we try to wrap at the lower-right corner of a window,
-                    # we cannot move the cursor (since that wouldn't be legal)
-                    self._win.addstr(self.height - 1, self.width - 1, bottom_right_corner_char)
-                except curses.error:
-                    pass
-
-            #self._win.refresh()
+                self.__drawCursesBox()
+                self._win.refresh()
 
             if self.windowTitle() != None:
                 self.__cursesTitleWindow()
             if isinstance(self, CMenu):
                 self.__cursesTitleWidget()
-        #self._win.refresh()
-
-        if self.parent() is core.CApplication.instance():
-            return
+        self._win.refresh()
         self.parent()._CWidget__cursesRefresh()
 
+    def __drawCursesBox(self):
+        side_char                = '│' # '|'
+        line_char                = '─' # '-'
+        top_left_corner_char     = '┌' # '+'
+        top_right_corner_char    = '┐' # '+'
+        bottom_left_corner_char  = '└' # '+'
+        bottom_right_corner_char = '┘' # '+'
+        crossing_four_widget     = '╬' # '+'
+        # top line
+        self._win.addstr(0, 1, line_char * (self.width - 2))
+        # bottom line
+        self._win.addstr(self.height - 1, 1, line_char * (self.width - 2))
+
+        for i in range(1, self.height - 1):
+            # Left side
+            self._win.addstr(i, 0, side_char)
+            # Right side
+            self._win.addstr(i, self.width - 1, side_char)
+
+        # Top Left corner
+        self._win.addstr(0, 0, top_left_corner_char)
+        # Top Right corner
+        self._win.addstr(0, self.width - 1, top_right_corner_char)
+        ## Bottom Left corner
+        self._win.addstr(self.height - 1, 0, bottom_left_corner_char)
+        ## Bottom Right corner
+        try:
+            #NOTE:
+            # If we try to wrap at the lower-right corner of a window,
+            # we cannot move the cursor (since that wouldn't be legal)
+            self._win.addstr(self.height - 1, self.width - 1, bottom_right_corner_char)
+        except curses.error:
+            pass
+
     def __setCursesWindow(self):
+        DEBUG("")
         # TODO: Must be change for newpad
         self._visible = True
         if self.parent() is core.CApplication.instance():
-            win = curses.newwin(self.height, self.width, self.y, self.x)
-            if self.parent().children()[0] == self and not CApplication.instance().focusWidget():
+            self._win = curses.newwin(self.height, self.width, self.y, self.x)
+            if (self.parent().children()[0] == self
+                and not CApplication.instance().focusWidget()):
                 self.setFocus(self)
-            def wrap(win):
-                return win
-
-            self._win = curses.wrapper(wrap)
         else:
             ERROR("self {} {}".format(self, self.geometry))
             ERROR("parent {} {}".format(self.parent(), self.parent().geometry))
@@ -150,22 +144,25 @@ class CWidget(QObject):
         self.__cursesRefresh()
 
     def __hasCursesWindow(self):
-        if hasattr(self, '_win'):
-            return True
-        return False
+        DEBUG("")
+        return True if hasattr(self, '_win') else False
 
     def __cursesWindow(self):
+        DEBUG("")
         return self._win
 
     def __cursesClearWindow(self):
+        DEBUG("")
         self._win.clear()
         self.__cursesRefresh()
 
     def __cursesMoveWindow(self):
+        DEBUG("")
         self._win.mvwin(self.y, self.x)
 
     #CMenu
     def __cursesTitleWidget(self):
+        DEBUG("")
         #TODO: This is not a good position for opt_key parsing
         # Maybe CAction can move this part of code
         opt_key_pos = str(self.title).find('&')
@@ -182,25 +179,28 @@ class CWidget(QObject):
 
     #CMainWindow
     def __cursesTitleWindow(self):
+        DEBUG("")
         self._win.addstr(self.y,
                         self.width // 2 - len(self.window_title) // 2,
                         self.window_title)
         self._win.refresh()
 
     def __cursesFindWindow(self, x, y):
+        DEBUG("")
         #TODO: TEST FUNCTION
-        if self._win.enclose(y, x):
-            self._childAt = self
-            for child in self.children():
-                child.__cursesFindWindow(x, y)
-        else:
+        if not self._win.enclose(y, x):
             return
+        self._childAt = self
+        for child in self.children():
+            child.__cursesFindWindow(x, y)
 
     @property
     def geometry(self):
+        DEBUG("")
         return (self._x, self._y, self._w, self._h)
 
     def setGeometry(self, x, y, w, h):
+        DEBUG("")
         self._x = x
         self._y = y
         self._w = w
@@ -230,35 +230,41 @@ class CWidget(QObject):
 
     @property
     def baseSize(self):
+        DEBUG("")
         return (self._basew, self._baseh)
 
     def setBaseSize(self, basew, baseh):
+        DEBUG("")
         self._basew = basew
         self._baseh = baseh
 
     @property
     def size(self):
+        DEBUG("")
         return (self._w, self._h)
 
     def setSize(self, w, h):
+        DEBUG("")
         self._w = w
         self._h = h
 
     def setFixedSize(self, w, h):
+        DEBUG("")
         self._w = w
         self._h = h
 
-
     def setMaximumSize(self, maxw, maxh):
+        DEBUG("")
         self._maxw = maxw
         self._maxh = maxh
 
     def setMinimumSize(self, minw, minh):
+        DEBUG("")
         self._minw = minw
         self._minh = minh
 
     def resize(self, w, h):
-        WARNING("")
+        DEBUG("")
         self._w = w
         self._h = h
         self.__cursesResizeWindow()
@@ -267,13 +273,13 @@ class CWidget(QObject):
 
     @property
     def pos(self):
+        DEBUG("")
         ''' Property of move(x, y) setter.'''
         return self._x , self._y
 
     def move(self, x, y):
         ''' Setter for pos property.'''
         DEBUG("")
-        WARNING("")
         self._x = x
         self._y = y
         self.__cursesMoveWindow()
@@ -291,9 +297,7 @@ class CWidget(QObject):
 
     def isWindow(self):
         DEBUG("")
-        if self.windowType() == WindowType.Window:
-            return True
-        return False
+        return True if self.windowType() == WindowType.Window else False
 
     def window(self):
         DEBUG("")
@@ -313,36 +317,40 @@ class CWidget(QObject):
             self.setParent(core.CApplication.instance())
 
     def windowType(self):
+        DEBUG("")
         return self.window_type
 
     @pyqtSlot(str)
     def setWindowTitle(self, title):
         DEBUG("")
-        if self.windowType() == WindowType.Window:
-            self.window_title = title
-# >>> DEBUG
-            if 1:
-                WARNING("{} ISVISIBLE {} TITLE {}".format(
-                                        self.objectName(),self.isVisible(), self.windowTitle()))
-            if self._visible:
-                self.show()
-        else:
+
+        if self.windowType() != WindowType.Window:
             raise TypeError
+        self.window_title = title
+# >>> DEBUG
+        if 1:
+            WARNING("{} ISVISIBLE {} TITLE {}".format(self.objectName(),
+                                                        self.isVisible(),
+                                                        self.windowTitle()))
+        if self._visible:
+            self.show()
 
     def windowTitle(self):
-        if hasattr(self, 'window_title'):
-            return self.window_title
-        return None
+        DEBUG("")
+        return self.window_title if hasattr(self, 'window_title') else None
 
     @property
     def layout(self):
+        DEBUG("")
         return self._layout
 
     def setLayout(self, layout):
+        DEBUG("")
         self._layout = layout
 
     @property
     def boxed(self):
+        DEBUG("")
         return self._boxed
 
     @pyqtSlot(bool)
@@ -352,10 +360,10 @@ class CWidget(QObject):
 
     @pyqtSlot()
     def update(self, x=0, y=0, w=0, h=0):
+        DEBUG("")
         #TODO: Update geometry inside Widget if update(x=..., y=...)
         # else update() the whole widget
-        if x > 0 or y > 0 or w > 0 or h > 0:
-            self.setGeometry(x, y, w, h)
+        if x > 0 or y > 0 or w > 0 or h > 0: self.setGeometry(x, y, w, h)
 
     @pyqtSlot()
     def close(self): raise NotImplemented
@@ -375,26 +383,30 @@ class CWidget(QObject):
 
     @pyqtSlot(bool)
     def setEnabled(self, enable):
+        DEBUG("")
         self._enable = enable
 
     def childAt(self, x, y):
+        DEBUG("")
         self._childAt = self.__cursesFindWindow()
         return self._childAt
 
     def hasFocus(self):
+        DEBUG("")
         return core.CApplication.instance().focusWidget() == self
 
     @pyqtSlot()
     def setFocus(self,):
+        DEBUG("")
         CApplication.instance()._focus_widget = self
 
     def isVisible(self):
-        if self._visible:
-            return True
-        return False
+        DEBUG("")
+        return True if self._visible else False
 
     @pyqtSlot(bool)
     def setVisible(self, visible):
+        DEBUG("")
         self._visible = visible
         if self._visible:
             self.show()
@@ -403,6 +415,7 @@ class CWidget(QObject):
 
     @pyqtSlot()
     def hide(self):
+        DEBUG("")
         self._visible = False
         self.setBoxed(False)
         self.update(*self.geometry)
@@ -411,11 +424,11 @@ class CWidget(QObject):
 
         for child in self.children():
             if isinstance(child, CWidget):
-                core.CApplication.instance().sendEvent(child,
-                                                CHideEvent())
+                core.CApplication.instance().sendEvent(child, CHideEvent())
 
     @pyqtSlot(bool)
     def setHidden(self, hidden):
+        DEBUG("")
         self._visible = not hidden
         if self._visible:
             self.show()
@@ -424,10 +437,10 @@ class CWidget(QObject):
 
     @pyqtSlot()
     def show(self):
-        ''' Show current widget and notify all widgets children to show '''
+        """Show current widget and notify all widgets children to show"""
+        DEBUG("")
         self._visible = True
         self.update(*self.geometry)
-
 
         if self.__hasCursesWindow():
             self.__cursesRefresh()
@@ -441,6 +454,7 @@ class CWidget(QObject):
 
     def customEvent(self, ev):
         #DEBUG("CSHOWEVENT {} | {}".format(ev.type(),self.objectName()))
+        DEBUG("")
         if ev.type() == CShowEvent().type():
             self.showEvent(ev)
         elif ev.type() == CHideEvent().type():
@@ -454,7 +468,8 @@ class CWidget(QObject):
             self.hide()
 
     def showEvent(self, event):
-        return
+        DEBUG("")
+        #return
         if self.isVisible():
             #DEBUG("> {}".format(self.objectName()))
             self.show()
@@ -479,10 +494,10 @@ class CMainWindow(CWidget):
 
         self.setGeometry(*core.CScreen.geometry())
         self.setBoxed(False)
-        #self.parent()._stdscr.refresh()
 
     def setCentralWidget(self, widget):
         """ by default x is 0 and the width is the parent width """
+        DEBUG("")
         widget.setParent(self)
         self._centralWidget = widget
         self._centralWidget.setBaseSize(self._centralWidget.parent().width,
@@ -492,11 +507,13 @@ class CMainWindow(CWidget):
         self._centralWidget.setBoxed(True)
 
     def centralWidget(self):
+        DEBUG("")
         if hasattr(self, '_centralWidget'):
             return self._centralWidget
         raise AttributeError
 
     def setMenuBar(self, menuBar):
+        DEBUG("")
         menuBar.setParent(self)
         self._menuBar = menuBar
         if menuBar.baseSize == menuBar.size:
@@ -508,6 +525,7 @@ class CMainWindow(CWidget):
         menuBar.setBoxed(True)
 
     def menuBar(self):
+        DEBUG("")
         if hasattr(self, '_menuBar'):
             return self._menuBar
         raise AttributeError
@@ -519,6 +537,7 @@ class CMainWindow(CWidget):
     def addToolBar(self): raise NotImplemented
 
     def eventFilter(self, obj, ev):
+        DEBUG("")
         return
         DEBUG("obj {} ev {}".format(obj, ev))
 

@@ -13,9 +13,8 @@ from event import *
 from ctypes import MouseAction,  MouseButton
 
 import widgets
-import sys
-sys.path.append('/home/louis/project')
-from Qc.Extra import *
+from utils.log import *
+from utils import colored_traceback
 import signal
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -23,18 +22,10 @@ class CApplication(QCoreApplication):
     focusChanged = pyqtSignal(widgets.CWidget, widgets.CWidget)
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
-        self.notifier = QSocketNotifier(0, QSocketNotifier.Read)
-        self.notifier.activated.connect(self.readyRead)
 # >>> DEBUG
         if 1:
             DEBUG("self: {} instance: {}".format(self, QCoreApplication.instance()))
-        stdscr = curses.initscr()
-
-        # convenience method
-        def wrap(stdscr):
-            return stdscr
-        # 1
-        self._stdscr = curses.wrapper(wrap)
+        self._stdscr = curses.initscr()
         self._stdscr.keypad(True)
         self._stdscr.nodelay(True)
         self._stdscr.scrollok(True)
@@ -42,7 +33,7 @@ class CApplication(QCoreApplication):
         # 2
         curses.noecho()
         curses.cbreak()
-        curses.curs_set(False)
+        curses.curs_set(0)
         curses.mousemask(curses.ALL_MOUSE_EVENTS)
 
         self.__curses_event = -1
@@ -55,31 +46,41 @@ class CApplication(QCoreApplication):
         QEvent.registerEventType(Type.cMouseButtonDoubleClicked.value)
         QEvent.registerEventType(Type.cMouseButtonTripleClicked.value)
 
-        self.timer = self.startTimer(1000)
         self.i = 0
         self._focus_widget = 0
 
+        #self.timer = self.startTimer(1000)
+        self.notifier = QSocketNotifier(0, QSocketNotifier.Read)
+        self.notifier.activated.connect(self.readyRead)
+
     def __cursesStdscr(self):
+        DEBUG("")
         return self._stdscr
 
     def __cursesStdscrRefresh(self):
+        DEBUG("")
         self._stdscr.refresh()
 
     def focusWidget(self):
+        DEBUG("")
         return self._focus_widget
 
     #@staticmethod
     def allWidgets(self):
+        DEBUG("")
         return widgets.CWidget._instances
 
     @staticmethod
     def font(widget):
+        DEBUG("")
         return widget.font
 
     def topLevelAt(self, x, y):
+        DEBUG("")
         return self.top_level_widget
 
     def widgetAt(self, x, y):
+        DEBUG("")
         tmp_y = tmp_x = sys.maxsize
         widget = 0
         for w in self.allWidgets():
@@ -96,9 +97,10 @@ class CApplication(QCoreApplication):
 
     @pyqtSlot()
     def readyRead(self):
+
+        DEBUG("STDSCR w,h: {}".format(tuple(reversed(self._stdscr.getmaxyx()))))
         curses.doupdate()
         self._stdscr.refresh()
-        INFO("STDSCR w,h: {}".format(tuple(reversed(self._stdscr.getmaxyx()))))
         self.__curses_event = self._stdscr.getch()
 
         if self.__curses_event == curses.ERR:
@@ -121,7 +123,7 @@ class CApplication(QCoreApplication):
                         button = b.name
                         val = int(b.value)
                         it = i
-                        WARNING("i= {} MOUSE KEY {} val {} = {}".format(i, b.name, val,bin(val)))
+                        #WARNING("i= {} MOUSE KEY {} val {} = {}".format(i, b.name, val,bin(val)))
                         break
                 # Find button action and send the appropriate event
                 for a in MouseAction:
@@ -141,22 +143,29 @@ class CApplication(QCoreApplication):
                                                         self.__curses_event))
 
     def childEvent(self, ev):
+        DEBUG("")
 # >>> DEBUG
-        if 0:
+        if 1:
             ERROR("CHILD EVENT {}".format(ev.type()))
         pass
 
     def timerEvent(self, ev):
 # >>> DEBUG
-        if 0:
+        if 1:
             INFO("TIMER EVENT ev {}, self.timer {}".format(ev.timerId(), self.timer))
         if ev.timerId() != self.timer:
             return
 
     def customEvent(self, event):
+        DEBUG("")
         if event.type() == Type.cKeyPress.value:
             DEBUG("key press text {} | key {}".format(event.text(), event.key()))
-        elif event.type() == Type.cMouseButtonClicked.value:
+        elif (event.type() == Type.cMouseButtonClicked.value ):#      or
+              #event.type() == Type.cMouseButtonDoubleClicked.value or
+              #event.type() == Type.cMouseButtonTripleClicked.value or
+              #event.type() == Type.cMouseButtonPressed.value       or
+              #event.type() == Type.cMouseButtonReleaseded.value):
+
             DEBUG("Button {} | type {}".format(event.button(), event.type()))
         elif event.type() == Type.cMouseButtonPressed.value:
             DEBUG("Button {} | type {}".format(event.button(), event.type()))
@@ -174,14 +183,16 @@ class CScreen(QObject):
 
     @staticmethod
     def size():
+        DEBUG("")
         return tuple(reversed(CApplication.instance()._stdscr.getmaxyx()))
 
     @staticmethod
     def geometry():
+        DEBUG("")
         pos = tuple(reversed(CApplication.instance()._stdscr.getbegyx()))
         return pos + CScreen.size()
 
-class E(Exception):pass
+class E(Exception): pass
 class CAction(QObject):
     def __init__(self, text=None, parent=None):
         super().__init__(parent)
@@ -191,4 +202,3 @@ class CAction(QObject):
 
         if name == any(['setIcon', 'setIconText','menu', 'setCheckable']):
             raise E("This method can not be call")
-

@@ -1,10 +1,7 @@
 import curses
 from PyQt5.QtCore import QEvent, QPoint
-from ctypes import MouseButton, FocusReason, Key
-from collections import OrderedDict
-import sys
-sys.path.append('/home/louis/project')
-from Qc.Extra import *
+from ctypes import FocusReason, Key, MouseButton
+from utils import *
 import string
 from enum import Enum
 import time
@@ -98,17 +95,13 @@ class CFocusEvent(QEvent):
         self._reason = reason
 
     def gotFocus(self):
-        if self._type is Type.cFocusIn.value:
-            return True
-        return False
+        return True if self._type is Type.cFocusIn.value else False
 
     def lostFocus(self):
-        if self._type is Type.cFocusOut.value:
-            return True
-        return False
+        return True if self._type is Type.cFocusOut.value else False
 
     def reason(self):
-        return self_reason
+        return self._reason
 
 class CFocusIn(CFocusEvent):
     def __init__(self):
@@ -117,5 +110,3 @@ class CFocusIn(CFocusEvent):
 class CFocusOut(CFocusEvent):
     def __init__(self):
         super().__init__(Type.cFocusOut.value)
-
-
