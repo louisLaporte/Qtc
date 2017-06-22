@@ -15,7 +15,6 @@ from utils import colored_traceback
 
 import sys
 import re
-import weakref
 import collections
 from functools import wraps
 
@@ -41,15 +40,14 @@ def dec(f):
 
 class CWidget(QObject):
 
-    _instances = []
     windowTitleChanged = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.__class__._instances.append(weakref.proxy(self))
+        DEBUG("{}".format(self))
         self.setObjectName(self.__class__.__name__)
         self.setParent(parent)
-        # By default it is  WindowType.Window if CWidget has no parent
+        # By default it is WindowType.Window if CWidget has no parent
         # else it is WindowType.Widget
         if parent is None:
             self.setWindowType(WindowType.Window)
@@ -74,7 +72,7 @@ class CWidget(QObject):
                                                         self.parent().objectName()))
             pos = tuple(reversed(self._win.getparyx()))
             size = tuple(reversed(self._win.getmaxyx()))
-            WARNING("curses: x {} y {} w {} h {}".format(*(pos + size)))
+            DEBUG("curses: x {} y {} w {} h {}".format(*(pos + size)))
 
         if self.parent() is core.CApplication.instance():
             return
@@ -132,8 +130,8 @@ class CWidget(QObject):
         if self.parent() is core.CApplication.instance():
             self._win = curses.newwin(self.height, self.width, self.y, self.x)
             if (self.parent().children()[0] == self
-                and not CApplication.instance().focusWidget()):
-                self.setFocus(self)
+                and not core.CApplication.instance().focusWidget()):
+                self.setFocus()
         else:
             ERROR("self {} {}".format(self, self.geometry))
             ERROR("parent {} {}".format(self.parent(), self.parent().geometry))
@@ -145,8 +143,8 @@ class CWidget(QObject):
         self.__cursesRefresh()
 
     def __cursesHasWindow(self):
-        DEBUG("")
-        return True if hasattr(self, '_win') else False
+        DEBUG("{}".format(hasattr(self,'_win')))
+        return hasattr(self, '_win')
 
     def __cursesWindow(self):
         DEBUG("")
@@ -198,7 +196,6 @@ class CWidget(QObject):
 
     @property
     def geometry(self):
-        DEBUG("")
         return (self._x, self._y, self._w, self._h)
 
     def setGeometry(self, x, y, w, h):
@@ -232,7 +229,6 @@ class CWidget(QObject):
 
     @property
     def baseSize(self):
-        DEBUG("")
         return (self._basew, self._baseh)
 
     def setBaseSize(self, basew, baseh):
@@ -396,13 +392,13 @@ class CWidget(QObject):
         return core.CApplication.instance().focusWidget() == self
 
     @pyqtSlot()
-    def setFocus(self,):
+    def setFocus(self):
         DEBUG("")
-        CApplication.instance()._focus_widget = self
+        core.CApplication.instance()._focus_widget = self
 
     def isVisible(self):
-        DEBUG("")
-        return True if self._visible else False
+        DEBUG("{}".format(self._visible))
+        return self._visible
 
     @pyqtSlot(bool)
     def setVisible(self, visible):

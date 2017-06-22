@@ -15,11 +15,14 @@ from ctypes import MouseAction,  MouseButton
 import widgets
 from utils.log import *
 from utils import colored_traceback
+import sys
 import signal
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 class CApplication(QCoreApplication):
+
     focusChanged = pyqtSignal(widgets.CWidget, widgets.CWidget)
+
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
 # >>> DEBUG
@@ -47,11 +50,12 @@ class CApplication(QCoreApplication):
         QEvent.registerEventType(Type.cMouseButtonTripleClicked.value)
 
         self.i = 0
-        self._focus_widget = 0
+        self._focus_widget = None
 
         #self.timer = self.startTimer(1000)
         self.notifier = QSocketNotifier(0, QSocketNotifier.Read)
         self.notifier.activated.connect(self.readyRead)
+        DEBUG("{}".format(tuple(reversed(self.__cursesStdscr().getmaxyx()))))
 
     def __cursesStdscr(self):
         DEBUG("")
@@ -61,14 +65,24 @@ class CApplication(QCoreApplication):
         DEBUG("")
         self._stdscr.refresh()
 
+    @pyqtSlot()
+    def quit(self):
+        DEBUG("")
+        curses.endwin()
+        super().quit()
+
+    def exit(self, return_code=0):
+        WARNING("{}".format(return_code))
+        curses.endwin()
+        super().exit(return_code)
+
     def focusWidget(self):
         DEBUG("")
         return self._focus_widget
 
-    #@staticmethod
     def allWidgets(self):
-        DEBUG("")
-        return widgets.CWidget._instances
+        DEBUG("{}".format(self.findChildren(widgets.CWidget)))
+        return self.findChildren(widgets.CWidget)
 
     @staticmethod
     def font(widget):
@@ -80,9 +94,9 @@ class CApplication(QCoreApplication):
         return self.top_level_widget
 
     def widgetAt(self, x, y):
-        DEBUG("")
+        DEBUG("x: {} y: {}".format(x, y))
         tmp_y = tmp_x = sys.maxsize
-        widget = 0
+        widget = None
         for w in self.allWidgets():
             maxy = w.y + w.height
             maxx = w.x + w.width
@@ -99,8 +113,6 @@ class CApplication(QCoreApplication):
     def readyRead(self):
 
         DEBUG("STDSCR w,h: {}".format(tuple(reversed(self._stdscr.getmaxyx()))))
-        curses.doupdate()
-        self._stdscr.refresh()
         self.__curses_event = self._stdscr.getch()
 
         if self.__curses_event == curses.ERR:
@@ -141,16 +153,17 @@ class CApplication(QCoreApplication):
             ERROR(" curses KEY {}".format(self.__curses_event))
             QCoreApplication.sendEvent(self, CKeyEvent(Type.cKeyPress.value,
                                                         self.__curses_event))
+        for widget in self.allWidgets():
+            widget._CWidget__cursesRefresh()
+        curses.doupdate()
 
     def childEvent(self, ev):
         DEBUG("")
-# >>> DEBUG
         if 1:
             ERROR("CHILD EVENT {}".format(ev.type()))
         pass
 
     def timerEvent(self, ev):
-# >>> DEBUG
         if 1:
             INFO("TIMER EVENT ev {}, self.timer {}".format(ev.timerId(), self.timer))
         if ev.timerId() != self.timer:
