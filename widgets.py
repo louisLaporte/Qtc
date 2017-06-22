@@ -80,17 +80,18 @@ class CWidget(QObject):
             return
         if self.isVisible():
             if self.boxed:
-                self.__drawCursesBox()
-                self._win.refresh()
+                self.__cursesDrawWindow()
+                self._win.noutrefresh()
 
             if self.windowTitle() != None:
                 self.__cursesTitleWindow()
             if isinstance(self, CMenu):
                 self.__cursesTitleWidget()
-        self._win.refresh()
+        self._win.noutrefresh()
+
         self.parent()._CWidget__cursesRefresh()
 
-    def __drawCursesBox(self):
+    def __cursesDrawWindow(self):
         side_char                = '│' # '|'
         line_char                = '─' # '-'
         top_left_corner_char     = '┌' # '+'
@@ -124,7 +125,7 @@ class CWidget(QObject):
         except curses.error:
             pass
 
-    def __setCursesWindow(self):
+    def __cursesSetWindow(self):
         DEBUG("")
         # TODO: Must be change for newpad
         self._visible = True
@@ -143,7 +144,7 @@ class CWidget(QObject):
         self._win.immedok(True)
         self.__cursesRefresh()
 
-    def __hasCursesWindow(self):
+    def __cursesHasWindow(self):
         DEBUG("")
         return True if hasattr(self, '_win') else False
 
@@ -180,10 +181,11 @@ class CWidget(QObject):
     #CMainWindow
     def __cursesTitleWindow(self):
         DEBUG("")
+        self._win.noutrefresh()
         self._win.addstr(self.y,
                         self.width // 2 - len(self.window_title) // 2,
                         self.window_title)
-        self._win.refresh()
+        self._win.noutrefresh()
 
     def __cursesFindWindow(self, x, y):
         DEBUG("")
@@ -267,18 +269,16 @@ class CWidget(QObject):
         DEBUG("")
         self._w = w
         self._h = h
-        self.__cursesResizeWindow()
-        if self._visible:
-            self.show()
+        core.CApplication.instance().sendEvent(self, CResizeEvent())
 
     @property
     def pos(self):
         DEBUG("")
-        ''' Property of move(x, y) setter.'''
+        """Property of move(x, y) setter."""
         return self._x , self._y
 
     def move(self, x, y):
-        ''' Setter for pos property.'''
+        """Setter for pos property."""
         DEBUG("")
         self._x = x
         self._y = y
@@ -421,6 +421,7 @@ class CWidget(QObject):
         self.update(*self.geometry)
 
         self.__cursesClearWindow()
+        self._win.touchwin()
 
         for child in self.children():
             if isinstance(child, CWidget):
@@ -442,13 +443,15 @@ class CWidget(QObject):
         self._visible = True
         self.update(*self.geometry)
 
-        if self.__hasCursesWindow():
+        if self.__cursesHasWindow():
             self.__cursesRefresh()
         else:
-            self.__setCursesWindow()
+            self.__cursesSetWindow()
+        self._win.touchwin()
 
         for child in self.children():
-            if (isinstance(child, CWidget) and child.isVisible()) or not child.__hasCursesWindow():
+            if ((isinstance(child, CWidget) and child.isVisible())
+                or not child.__cursesHasWindow()):
                 child.show()
                 core.CApplication.instance().sendEvent(child, CShowEvent())
 
@@ -459,8 +462,13 @@ class CWidget(QObject):
             self.showEvent(ev)
         elif ev.type() == CHideEvent().type():
             self.hideEvent(ev)
+        elif ev.type() == CResizeEvent().type():
+            self.resizeEvent(ev)
 
-    def resizeEvent(self, event): raise NotImplemented
+    def resizeEvent(self, event):
+        self._win.clear()
+        self.__cursesRefresh()
+
     def moveEvent(self, event): raise NotImplemented
     def hideEvent(self, event):
         DEBUG("{}".format(self))
@@ -514,15 +522,17 @@ class CMainWindow(CWidget):
 
     def setMenuBar(self, menuBar):
         DEBUG("")
+        if not isinstance(menuBar, CMenuBar):
+            raise TypeError
         menuBar.setParent(self)
         self._menuBar = menuBar
         if menuBar.baseSize == menuBar.size:
             ERROR("")
-            self._menuBar.setGeometry(0, 1, self.width, 3)
+            self._menuBar.setGeometry(self.x, self.y + 1, self.width, 3)
 # >>> DEBUG
         if 1:
             DEBUG("MENU BAR CHILDREN ARE {}".format(menuBar.children()))
-        menuBar.setBoxed(True)
+        self._menuBar.setBoxed(True)
 
     def menuBar(self):
         DEBUG("")
@@ -530,9 +540,21 @@ class CMainWindow(CWidget):
             return self._menuBar
         raise AttributeError
 
-    def statusBar(self): raise NotImplemented
+    def statusBar(self):
+        if hasattr(self, '_statusBar'):
+            return self._statusBar
+        raise AttributeError
 
-    def setStatusBar(self, statusBar): raise NotImplemented
+    def setStatusBar(self, statusBar):
+        if not isinstance(statusBar, CStatusBar):
+            raise TypeError
+        statusBar.setParent(self)
+        self._statusBar = statusBar
+        if statusBar.baseSize == statusBar.size:
+            ERROR("")
+            self._statusBar.setGeometry(self.x, self.height - self._statusBar.height,
+                                        self.width, 1)
+        #self._statusBar.setBoxed(True)
 
     def addToolBar(self): raise NotImplemented
 
@@ -617,6 +639,8 @@ class CStatusBar(CWidget):
 
     def __init__(self, parent=None):
         super().__init__()
+        self.setBaseSize(2, 2)
+        self.setGeometry(0, 0, *self.baseSize)
         self._widgets = []
         self._message = None
 
@@ -647,9 +671,11 @@ class CStatusBar(CWidget):
     @pyqtSlot(str, int)
     def showMessage(self, message, timeout=0):
         self._message = message
+        self._win.addstr(self.x, self.y, self._message)
+        self._win.refresh()
 
     def paintEvent(self, event): raise NotImplemented
     def resizeEvent(self, event): raise NotImplemented
-    def showEvent(self, event): raise NotImplemented
+    #def showEvent(self, event): raise NotImplemented
 
 #vim: foldmethod=indent
