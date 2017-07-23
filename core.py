@@ -9,15 +9,116 @@ from PyQt5.QtCore import (QCoreApplication,
                             QMetaType,
                             QEvent)
 from PyQt5.QtWidgets import QAction
+import event
 from event import *
-from ctypes import MouseAction,  MouseButton
 
+from ctypes import MouseAction, MouseButton
+import types
 import widgets
 from utils.log import *
 from utils import colored_traceback
 import sys
+import functools
 import signal
 signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+class Screen(object):
+    def __init__(self):
+        self.scr = curses.initscr()
+        self.scr.keypad(True)
+        self.scr.nodelay(1)
+        self.scr.scrollok(True)
+        curses.noecho()
+        curses.cbreak()
+        curses.curs_set(0)
+        curses.mousemask(curses.ALL_MOUSE_EVENTS)
+
+    def __setattr__(self, name, value):
+        INFO("name {} value {}".format(name, value))
+        return super().__setattr__(name, value)
+
+    def __getattribute__(self, name):
+        att = super().__getattribute__(name)
+
+        if (isinstance(att, types.FunctionType) or isinstance(att, types.MethodType)):
+            INFO("Screen {}".format(name))
+        return att
+
+    @staticmethod
+    def update():
+        """Refresh marked windows."""
+        curses.doupdate()
+
+    def exit(self):
+        """Same as curses.wrapper finally."""
+        self.scr.keypad(0)
+        curses.echo()
+        curses.nocbreak()
+        #curses.curs_set(1)
+        curses.endwin()
+
+    def __getattr__(self, name):
+        ERROR("{}".format(name))
+        if hasattr(self, name):
+            return getattr(self, name)
+        else:
+            raise AttributeError
+            self.exit()
+
+    @staticmethod
+    def beep():
+        curses.beep()
+
+    @property
+    def size(self):
+        return tuple(reversed(self.scr.getmaxyx()))
+
+    @property
+    def geometry(self):
+        pos = tuple(reversed(self.scr.getbegyx()))
+        return pos + self.size
+
+    def event_manager(self):
+        self.event = self.scr.getch()
+
+        if self.event == curses.ERR:
+            return
+        elif self.event == curses.KEY_RESIZE:
+            # NOTE: Does not work with tmux virtual window split, only with
+            # a single physical  window terminal
+            DEBUG("RESIZE")
+            return
+        elif self.event == curses.KEY_MOUSE:
+            try:
+                id_, x, y, z, bstate = curses.getmouse()
+            except curses.error:
+                # Error are like right click or back wheel movment
+                return
+            else:
+                it = 0
+                val = 0
+                button = None
+                action = None
+                attr = None
+                # Find which button event comes from
+                for i, b in enumerate(MouseButton):
+                    if bstate & b.value:
+                        button = b.name
+                        val = int(b.value)
+                        it = i
+                        #WARNING("i= {} MOUSE KEY {} val {} = {}".format(i, b.name, val, bin(val)))
+                        break
+                else:
+                    return
+                # Find button action and send the appropriate event
+                for action in MouseAction:
+                    if ((val & bstate ) >> (it * 6)) == action.value:
+                        attr = getattr(Type, "cMouseButton"+action.name)
+                        return CMouseEvent(attr.value, QPoint(x, y), button)
+
+        else:
+            #DEBUG("\033[31;1m curses KEY {} \033[0m".format(self.event))
+            return CKeyEvent(Type.cKeyPress.value, self.event)
 
 class CApplication(QCoreApplication):
 
@@ -25,76 +126,55 @@ class CApplication(QCoreApplication):
 
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
-# >>> DEBUG
-        if 1:
-            DEBUG("self: {} instance: {}".format(self, QCoreApplication.instance()))
-        self._stdscr = curses.initscr()
-        self._stdscr.keypad(True)
-        self._stdscr.nodelay(True)
-        self._stdscr.scrollok(True)
+        INFO("------------------------------------")
+        self._stdscr = Screen()
 
-        # 2
-        curses.noecho()
-        curses.cbreak()
-        curses.curs_set(0)
-        curses.mousemask(curses.ALL_MOUSE_EVENTS)
+        for event_type in event.Type:
+            QEvent.registerEventType(getattr(event_type, 'value'))
 
-        self.__curses_event = -1
-
-        QEvent.registerEventType(Type.cKeyPress.value)
-
-        QEvent.registerEventType(Type.cMouseButtonClicked.value)
-        QEvent.registerEventType(Type.cMouseButtonPressed.value)
-        QEvent.registerEventType(Type.cMouseButtonReleased.value)
-        QEvent.registerEventType(Type.cMouseButtonDoubleClicked.value)
-        QEvent.registerEventType(Type.cMouseButtonTripleClicked.value)
-
-        self.i = 0
         self._focus_widget = None
 
         #self.timer = self.startTimer(1000)
         self.notifier = QSocketNotifier(0, QSocketNotifier.Read)
         self.notifier.activated.connect(self.readyRead)
-        DEBUG("{}".format(tuple(reversed(self.__cursesStdscr().getmaxyx()))))
 
-    def __cursesStdscr(self):
-        DEBUG("")
-        return self._stdscr
+    #def exec_(self):
+    #    try:
+    #        super().exec_()
+    #    except Exception as err:
+    #        self._stdscr.exit()
+    #        print(err)
 
-    def __cursesStdscrRefresh(self):
-        DEBUG("")
-        self._stdscr.refresh()
+    def beep(self):
+        self._stdscr.beep()
 
     @pyqtSlot()
     def quit(self):
-        DEBUG("")
-        curses.endwin()
-        super().quit()
+        """Quit application after restore curses cooked mode."""
+        self.exit()
 
     def exit(self, return_code=0):
-        WARNING("{}".format(return_code))
-        curses.endwin()
+        """Exit application after restore curses cooked mode."""
+        if self.notifier.isEnabled():
+            self.notifier.setEnabled(False)
         super().exit(return_code)
+        self._stdscr.exit(return_code)
 
     def focusWidget(self):
-        DEBUG("")
         return self._focus_widget
 
     def allWidgets(self):
-        DEBUG("{}".format(self.findChildren(widgets.CWidget)))
         return self.findChildren(widgets.CWidget)
 
     @staticmethod
     def font(widget):
-        DEBUG("")
         return widget.font
 
     def topLevelAt(self, x, y):
-        DEBUG("")
         return self.top_level_widget
 
     def widgetAt(self, x, y):
-        DEBUG("x: {} y: {}".format(x, y))
+        #DEBUG("x: {} y: {}".format(x, y))
         tmp_y = tmp_x = sys.maxsize
         widget = None
         for w in self.allWidgets():
@@ -111,56 +191,24 @@ class CApplication(QCoreApplication):
 
     @pyqtSlot()
     def readyRead(self):
-
-        DEBUG("STDSCR w,h: {}".format(tuple(reversed(self._stdscr.getmaxyx()))))
-        self.__curses_event = self._stdscr.getch()
-
-        if self.__curses_event == curses.ERR:
+        """Read all input from keyboard and mouse.
+        Note:
+            This method call curses window.getch() so the whole window must be redrawn.
+        """
+        ret = self._stdscr.event_manager()
+        if ret is None:
             return
-        if self.__curses_event == curses.KEY_MOUSE:
-            try:
-                id_, x, y, z, bstate = curses.getmouse()
-            except curses.error as err:
-                # Error are like right click or back wheel movment
-                return
-            else:
-                it = 0
-                val = 0
-                button = None
-                action = None
-                attr = None
-                # Find which button it comes from
-                for i, b in enumerate(MouseButton):
-                    if bstate & b.value:
-                        button = b.name
-                        val = int(b.value)
-                        it = i
-                        #WARNING("i= {} MOUSE KEY {} val {} = {}".format(i, b.name, val,bin(val)))
-                        break
-                # Find button action and send the appropriate event
-                for a in MouseAction:
-                    if ((val & bstate ) >> (it * 6)) == a.value:
-                        attr = getattr(Type, "cMouseButton" + a.name)
-                        break
 
-                QCoreApplication.sendEvent(self, CMouseEvent(attr.value,
-                                                             QPoint(x, y),
-                                                             button))
-
-        elif self.__curses_event == curses.KEY_RESIZE:
-            ERROR("RESIZE")
-        else:
-            ERROR(" curses KEY {}".format(self.__curses_event))
-            QCoreApplication.sendEvent(self, CKeyEvent(Type.cKeyPress.value,
-                                                        self.__curses_event))
+        QCoreApplication.sendEvent(self, ret)
         for widget in self.allWidgets():
-            widget._CWidget__cursesRefresh()
-        curses.doupdate()
+            if widget.isVisible():
+                widget.show()
+        Screen.update()
 
     def childEvent(self, ev):
-        DEBUG("")
+        #DEBUG("")
         if 1:
-            ERROR("CHILD EVENT {}".format(ev.type()))
+            DEBUG("CHILD EVENT {} {}".format(ev.type(), ev))
         pass
 
     def timerEvent(self, ev):
@@ -170,7 +218,7 @@ class CApplication(QCoreApplication):
             return
 
     def customEvent(self, event):
-        DEBUG("")
+        #DEBUG("\033[35;5m{} \033[0m".format(event))
         if event.type() == Type.cKeyPress.value:
             DEBUG("key press text {} | key {}".format(event.text(), event.key()))
         elif (event.type() == Type.cMouseButtonClicked.value ):#      or
@@ -194,16 +242,13 @@ class CScreen(QObject):
     def __init__(self):
         super().__init__()
 
-    @staticmethod
-    def size():
-        DEBUG("")
-        return tuple(reversed(CApplication.instance()._stdscr.getmaxyx()))
+    @property
+    def size(self):
+        return CApplication.instance()._stdscr.size
 
-    @staticmethod
-    def geometry():
-        DEBUG("")
-        pos = tuple(reversed(CApplication.instance()._stdscr.getbegyx()))
-        return pos + CScreen.size()
+    @property
+    def geometry(self):
+        return CApplication.instance()._stdscr.geometry
 
 class E(Exception): pass
 class CAction(QObject):
@@ -212,6 +257,5 @@ class CAction(QObject):
 
     def __getattribute__(self, name):
         INFO(name)
-
-        if name == any(['setIcon', 'setIconText','menu', 'setCheckable']):
+        if name == any(['setIcon', 'setIconText', 'menu', 'setCheckable']):
             raise E("This method can not be call")

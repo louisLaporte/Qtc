@@ -86,7 +86,7 @@ class CMoveEvent(QEvent):
 
 class CResizeEvent(QEvent):
     def __init__(self):
-        super().__init__(Type.cResize)
+        super().__init__(Type.cResize.value)
 
 class CFocusEvent(QEvent):
     def __init__(self, type_, reason=FocusReason.Other):
