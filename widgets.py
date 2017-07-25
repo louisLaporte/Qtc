@@ -184,30 +184,9 @@ class _Window():
         self.win.clear()
         self.win.noutrefresh()
 
-class CWidget(QObject):
-
-    windowTitleChanged = pyqtSignal(str)
-
+class CObject(QObject):
     def __init__(self, parent=None):
-        """When initialize a CWidget it is always enabled, not boxed(framed) and
-        not visible. Moreover the attribute _win is created, it is a binding to 
-        the class _Window, it must only be access in CApplication."""
         super().__init__(parent=parent)
-        DEBUG("{}".format(self))
-        self.setParent(parent)
-        # By default it is WindowType.Window if CWidget has no parent
-        # else it is WindowType.Widget
-        if parent is None:
-            self.setWindowType(WindowType.Window)
-        else:
-            self.setWindowType(WindowType.Widget)
-
-        self.setBoxed(False)
-        self.setEnabled(True)
-        self._visible = False
-        self.setBaseSize(10, 10)
-        self.setGeometry(0, 0, *self.baseSize)
-        self._win = _Window(*self.geometry)
 
     def __getattr__(self, name):
         WARNING("{} --> unknown attribute {}".format(self.objectName(), name))
@@ -239,6 +218,31 @@ class CWidget(QObject):
                 return wrapper(attr)
             else:
                 return attr
+
+class CWidget(CObject):
+
+    windowTitleChanged = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        """When initialize a CWidget it is always enabled, not boxed(framed) and
+        not visible. Moreover the attribute _win is created, it is a binding to 
+        the class _Window, it must only be access in CApplication."""
+        super().__init__(parent=parent)
+        DEBUG("{}".format(self))
+        self.setParent(parent)
+        # By default it is WindowType.Window if CWidget has no parent
+        # else it is WindowType.Widget
+        if parent is None:
+            self.setWindowType(WindowType.Window)
+        else:
+            self.setWindowType(WindowType.Widget)
+
+        self.setBoxed(False)
+        self.setEnabled(True)
+        self._visible = False
+        self.setBaseSize(10, 10)
+        self.setGeometry(0, 0, *self.baseSize)
+        self._win = _Window(*self.geometry)
 
     @property
     def geometry(self):
@@ -640,6 +644,7 @@ class CStatusBar(CWidget):
     def resizeEvent(self, event): raise NotImplemented
     #def showEvent(self, event): raise NotImplemented
 
+class CWidgetItem(): pass
 
 ################################################################################
 #                                   BUTTON
@@ -726,9 +731,171 @@ class CLayoutItem(metaclass=abc.ABCMeta):
     def widget(self):
         ...
 
-class CLayout(QObject):
+
+class __CLayout(CObject):
+    __metaclass__ = CLayoutItem
     def __init__(self, parent=None):
         super().__init__(parent=parent)
+    
+class CLayout(__CLayout):
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        if parent:
+            parent.setLayout(self)
+
+    def parentWidget(self):
+        """parent = self.parent()"""
+        parent = self.parent()
+        if not self.topLevel:
+            if parent:
+                if not isinstance(parent, CLayout):
+                    WARNING("A layout can only have another layout as a parent.")
+                    return 0
+                return parent.parentWidget()
+            else:
+                return 0
+        else:
+            parent
+
+    def isEmpty(self):
+        i = 0
+        item = itemAt(i)
+        while item:
+            if not item.isEmpty():
+                return False
+            i += 1
+            item = itemAt(i)
+        return True
+
+    def controlTypes(self):
+        if self.count() == 0:
+            return CSizePolicy.DefaultType
+        types = CSizePolicy.ControlTypes
+        for i in reversed(self.count()):
+            types |= self.itemAt(i).controlTypes()
+        return types
+
+    def setGeometry(self, x, y, w, h):
+        self._rect = (x, y, w, h)
+
+    @property
+    def geometry(self):
+        return self._rect
+
+    def replaceWidget(self, from_, to, options=None):
+        idx = -1
+        item = 0
+        for i in self.count():
+            item = self.itemAt(i)
+            if not item:
+                continue
+            if item.widget() and (options & Qt.FindChildrenRecursively):
+                r = item.layout().replaceWidget(from_, to, options)
+                if r:
+                    return r
+        if idx == -1:
+            return 0
+        self.addChildWidget(to)
+        newitem = CWidgetItem(to)
+        newitem.setAlignment(item.alignment())
+        r = self.replaceAt(index, newitem)
+        if not r:
+            del newitem
+        return r
+
+    def count(self):
+        ...
+
+    def itemAt(self, index):
+        ...
+
+    def indexOf(self, widget):
+        i = 0
+        item = self.itemAt(i)
+        while item:
+            if item.widget() == widget:
+                return i
+            i += 1
+            item = self.itemAt(i)
+        return -1
+
+    def invalidate(self):
+        self._rect = CRect()
+        self.update()
+
+    def removeWidgetRecursively(layout_item, widget):
+        li = layout_item
+        w = widget
+        lay = li.layout()
+        i = 0
+        if not lay:
+            return False
+        child = lay.itemAt(i)
+        while (child):
+            if child.widget() == w:
+                del lay.takeAt(i)
+                lay.invalidate()
+                return True
+            elif self.removeWidgetRecursively(child, w):
+                return True
+            else:
+                i += 1
+                child = lay.itemAt(i)
+        return False
+
+    def _widgetEvent(self, event):
+        raise NotImplemented
+
+    def childEvent(self, event):
+        raise NotImplemented
+
+    def _totalHeightForWidth(self, width):
+        w = widget
+        raise NotImplemented
+
+    def _totalMinimumSize(self):
+        raise NotImplemented
+
+    def _totalSizeHint(self):
+        raise NotImplemented
+
+    def _totalMaximumSize(self):
+        raise NotImplemented
+
+    def addChildLayout(self, layout):
+        if layout.parent():
+            WARNING("QLayout.addChildLayout: layout {} already has a parent"
+                    .format(layout.objectName()))
+            return
+        layout.setParent(self)
+        # TODO: use private class
+        if self.parentWidget():
+            pass
+            # l->d_func()->reparentChildWidgets(mw);
+
+    def _adoptLayout(self, layout):
+        self.addChildLayout(layout)
+        return not layout.parent()
 
 
+class CSizePolicy:
+    class ControlType(Enum):
+        DefaultType	= 0x00000001 # The default type, when none is specified.
+        ButtonBox	= 0x00000002 # A QDialogButtonBox instance.
+        CheckBox	= 0x00000004 # A QCheckBox instance.
+        ComboBox	= 0x00000008 # A QComboBox instance.
+        Frame   	= 0x00000010 # A QFrame instance.
+        GroupBox	= 0x00000020 # A QGroupBox instance.
+        Label   	= 0x00000040 # A QLabel instance.
+        Line	    = 0x00000080 # A QFrame instance with QFrame::HLine or QFrame::VLine.
+        LineEdit	= 0x00000100 # A QLineEdit instance.
+        PushButton	= 0x00000200 # A QPushButton instance.
+        RadioButton	= 0x00000400 # A QRadioButton instance.
+        Slider	    = 0x00000800 # A QAbstractSlider instance.
+        SpinBox	    = 0x00001000 # A QAbstractSpinBox instance.
+        TabWidget	= 0x00002000 # A QTabWidget instance.
+        ToolButton	= 0x00004000 # A QToolButton instance.
+
+class CRect(): pass
+class Cpoint(): pass
 #vim: foldmethod=indent
