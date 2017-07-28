@@ -1,5 +1,19 @@
 import curses
 import curses.ascii
+import event
+from event import *
+
+from ctypes import MouseAction, MouseButton
+import types
+#import widgets
+from utils.log import *
+from utils import colored_traceback
+import sys
+import functools
+import signal
+import inspect
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 from PyQt5.QtCore import (QCoreApplication,
                             QObject,
                             pyqtSlot,
@@ -7,21 +21,12 @@ from PyQt5.QtCore import (QCoreApplication,
                             QTimerEvent,
                             QSocketNotifier,
                             QMetaType,
-                            QEvent)
+                            QEvent,
+                            QSize,
+                            QRect,
+                            QPoint)
+
 from PyQt5.QtWidgets import QAction
-import event
-from event import *
-
-from ctypes import MouseAction, MouseButton
-import types
-import widgets
-from utils.log import *
-from utils import colored_traceback
-import sys
-import functools
-import signal
-signal.signal(signal.SIGINT, signal.SIG_DFL)
-
 class Screen(object):
     def __init__(self):
         self.scr = curses.initscr()
@@ -59,11 +64,7 @@ class Screen(object):
 
     def __getattr__(self, name):
         ERROR("{}".format(name))
-        if hasattr(self, name):
-            return getattr(self, name)
-        else:
-            raise AttributeError
-            self.exit()
+        self.exit()
 
     @staticmethod
     def beep():
@@ -120,9 +121,10 @@ class Screen(object):
             #DEBUG("\033[31;1m curses KEY {} \033[0m".format(self.event))
             return CKeyEvent(Type.cKeyPress.value, self.event)
 
+
 class CApplication(QCoreApplication):
 
-    focusChanged = pyqtSignal(widgets.CWidget, widgets.CWidget)
+    #focusChanged = pyqtSignal(widgets.CWidget, widgets.CWidget)
 
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
@@ -158,12 +160,15 @@ class CApplication(QCoreApplication):
         if self.notifier.isEnabled():
             self.notifier.setEnabled(False)
         super().exit(return_code)
-        self._stdscr.exit(return_code)
+        self._stdscr.exit()
 
     def focusWidget(self):
         return self._focus_widget
 
     def allWidgets(self):
+        # import module here because in widgets module there are references
+        # to core module
+        import widgets
         return self.findChildren(widgets.CWidget)
 
     @staticmethod
@@ -237,8 +242,54 @@ class CApplication(QCoreApplication):
         elif event.type() == Type.cMouseButtonTripleClicked.value:
             DEBUG("Button {} | type {}".format(event.button(), event.type()))
 
+class CObject(QObject):
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+
+    def __getattr__(self, name):
+        WARNING("{} --> unknown attribute {}".format(self.objectName(), name))
+        self.__dict__[name] = 0
+        return 0
+
+    def __getattribute__(self, name):
+        """Reimplemented method for debugging purpose."""
+        try:
+            attr = super().__getattribute__(name)
+        except Exception as err:
+            ERROR("{}".format(err))
+            raise AttributeError
+        else:
+            if (isinstance(attr, types.FunctionType)
+                or isinstance(attr, types.MethodType)):
+                keys = inspect.getargspec(attr).args
+                item = 'self'
+                if item in keys:
+                    keys.remove(item)
+
+                def wrapper(func):
+                    def _(*args, **kwargs):
+                        # TODO: This is where all self._win(...) method must be called
+                        # they must have the same name (ex: move, resize, etc...)
+                        #getattr(self._win, func)(*args, **kwargs)
+                        val = locals()['args']
+                        DEBUG("{} {} {}".format(self.objectName(),
+                                                name,
+                                                {k:v for k,v in zip(keys, val)})
+                        )
+                        return func(*args, **kwargs)
+                    return _
+                return wrapper(attr)
+            else:
+                return attr
+
+class CSize(QSize): pass
+
+class CRect(QRect): pass
+
+class CPoint(QPoint): pass
+
 ################################################################################
-class CScreen(QObject):
+class CScreen(CObject):
     def __init__(self):
         super().__init__()
 
@@ -251,7 +302,7 @@ class CScreen(QObject):
         return CApplication.instance()._stdscr.geometry
 
 class E(Exception): pass
-class CAction(QObject):
+class CAction(CObject):
     def __init__(self, text=None, parent=None):
         super().__init__(parent)
 
