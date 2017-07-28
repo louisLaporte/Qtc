@@ -2,111 +2,26 @@ import curses
 #import locale
 #locale.setlocale(locale.LC_ALL, '')
 
-from PyQt5.QtCore import (QObject,
-                            pyqtSlot,
-                            pyqtSignal,
-                            QTimerEvent,
-                            QEvent)
 from event import *
 from ctypes import WindowType, MouseButton
 import core
 from utils.log import *
+from multimethods import multimethod
 from utils import colored_traceback
 
-import types
 import sys
+import types
 import re
 import abc
 import collections
 from functools import wraps
-import inspect
 
-
-def iterfy(iterable):
-    if isinstance(iterable, str):
-        iterable = [iterable]
-    try:
-        iter(iterable)
-    except TypeError:
-        iterable = [iterable]
-    return iterable
-
-class _Curses():
-    def refresh(self):
-        """Recursively mark current widget and his children to refresh but wait.
-        """
-        DEBUG("")
-        if self.parent() is core.CApplication.instance():
-            return
-        if self.isVisible():
-            if self.boxed:
-                self.__cursesDrawWindow()
-                self._win.noutrefresh()
-
-            if self.windowTitle() != None:
-                self.__cursesTitleWindow()
-            if isinstance(self, CMenu):
-                self.__cursesTitleWidget()
-        self._win.noutrefresh()
-
-        self.parent()._CWidget__cursesRefresh()
-
-    def setWindow(self):
-        DEBUG("")
-        # TODO: Must be change for newpad
-        self._visible = True
-        if self.parent() is core.CApplication.instance():
-            self._win = curses.newwin(self.height, self.width, self.y, self.x)
-            if (self.parent().children()[0] == self
-                and not core.CApplication.instance().focusWidget()):
-                self.setFocus()
-        else:
-            ERROR("self {} {}".format(self, self.geometry))
-            ERROR("parent {} {}".format(self.parent(), self.parent().geometry))
-            self._win = self.parent()._win.subwin(self.height, self.width,
-                                                    self.y, self.x)
-            # 2 lines below are default (test curses.A_BLINK)
-            self._win.overwrite(self.parent()._win)
-        self._win.immedok(True)
-        self.__cursesRefresh()
-
-    def clearWindow(self):
-        self._win.clear()
-        self.__cursesRefresh()
-
-    #CMenu
-    def titleWidget(self):
-        DEBUG("")
-        #TODO: This is not a good position for opt_key parsing
-        # Maybe CAction can move this part of code
-        opt_key_pos = str(self.title).find('&')
-        if opt_key_pos != -1:
-            opt_key = str(self.title)[opt_key_pos + 1]
-            before = str(self.title)[:opt_key_pos]
-            after = str(self.title)[opt_key_pos + 2:]
-            self._win.addstr(1, 1, before)
-            self._win.addstr(1, len(before) + 1, opt_key,
-                                curses.A_REVERSE | curses.A_UNDERLINE | curses.A_BOLD)
-            self._win.addstr(1, len(before) + len(opt_key) + 1, after)
-        else:
-            self._win.addstr(1, 1, self.title)
-
-    #CMainWindow
-    def titleWindow(self):
-        DEBUG("")
-        self._win.addstr(self.y,
-                        self.width // 2 - len(self.window_title) // 2,
-                        self.window_title)
-        self._win.noutrefresh()
-
-    def findWindow(self, x, y):
-        DEBUG("")
-        #TODO: TEST FUNCTION
-        if not self._win.enclose(y, x):
-            return
-        self._childAt = self
-        for child in self.children():
-            child.__cursesFindWindow(x, y)
+from PyQt5.QtCore import (  Qt,
+                            QObject,
+                            pyqtSlot,
+                            pyqtSignal,
+                            QTimerEvent,
+                            QEvent)
 
 class _Window():
 
@@ -183,43 +98,37 @@ class _Window():
     def clear(self):
         self.win.clear()
         self.win.noutrefresh()
+################################################################################
+#                               Widget
+################################################################################
+class CWidgetData:
+    windid              = None
+    widget_attributes   = None
+    window_flags        = None
+    window_state        = None
+    focus_policy        = None
+    sizehint_forced     = None
+    is_closing          = None
+    in_show             = None
+    in_set_window_state = None
+    fstrut_dirty        = None
+    context_menu_policy = None
+    window_modality     = None
+    in_destructor       = None
+    unused              = None
+    crect               = core.CRect()
+    pal                 = None #QPalette
+    fnt                 = None #QFont
+    wrect               = core.CRect;
 
-class CObject(QObject):
+class __CWidget(core.CObject):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
+        if not core.CApplication.instance():
+            ERROR("Cannot create a CWidget without CApplication")
+            sys.exit()
 
-    def __getattr__(self, name):
-        WARNING("{} --> unknown attribute {}".format(self.objectName(), name))
-        self.__dict__[name] = 0
-        return 0
-
-    def __getattribute__(self, name):
-        """Reimplemented method for debugging purpose."""
-        try:
-            attr = super().__getattribute__(name)
-        except Exception as err:
-            ERROR("{}".format(err))
-            raise AttributeError
-            core.CApplication.instance().exit()
-        else:
-            if (isinstance(attr, types.FunctionType)
-                or isinstance(attr, types.MethodType)):
-                keys = inspect.getargspec(attr).args
-                keys.remove('self')
-                def wrapper(func):
-                    def _(*args, **kwargs):
-                        # TODO: This is where all self._win(...) method must be called
-                        # they must have the same name (ex: move, resize, etc...)
-                        #getattr(self._win, func)(*args, **kwargs)
-                        val = locals()['args']
-                        DEBUG("{} {} {}".format(self.objectName(), name, {k:v for k,v in zip(keys, val)}))
-                        return func(*args, **kwargs)
-                    return _
-                return wrapper(attr)
-            else:
-                return attr
-
-class CWidget(CObject):
+class CWidget(__CWidget):
 
     windowTitleChanged = pyqtSignal(str)
 
@@ -229,6 +138,7 @@ class CWidget(CObject):
         the class _Window, it must only be access in CApplication."""
         super().__init__(parent=parent)
         DEBUG("{}".format(self))
+
         self.setParent(parent)
         # By default it is WindowType.Window if CWidget has no parent
         # else it is WindowType.Widget
@@ -236,7 +146,7 @@ class CWidget(CObject):
             self.setWindowType(WindowType.Window)
         else:
             self.setWindowType(WindowType.Widget)
-
+        self.data =  CWidgetData()
         self.setBoxed(False)
         self.setEnabled(True)
         self._visible = False
@@ -286,17 +196,205 @@ class CWidget(CObject):
     def size(self):
         return (self._w, self._h)
 
-    def setSize(self, w, h):
-        self._w, self._h = w, h
+    @multimethod(core.CSize)
+    def setFixedSize(self, size):
+        self._w, self._h = size.width(), size.height()
 
+    @multimethod(int, int)
     def setFixedSize(self, w, h):
         self._w, self._h = w, h
 
-    def setMaximumSize(self, maxw, maxh):
-        self._maxw, self._maxh = maxw, maxh
+    @property
+    def minimized(self):
+        """Whether this widget is minimized (iconified)
+
+        This property is only relevant for windows.
+
+        By default, this property is False.
+
+        Access function:
+        :func:`isMinimized()`
+
+        :rtype: bool
+
+        .. seealso:: showMinimized(), visible, show(), hide(), showNormal(), maximized
+        """
+        return self.isMinimized()
+
+    def isMinimized(self):
+        return self.data.window_state & Qt.WindowMinimized
+
+    def showMinimized(self):
+        """ Shows the widget minimized, as an icon.
+
+        Calling this function only affects windows.
+
+        .. seealso:: showNormal(), showMaximized(), show(), hide(), isVisible(),
+        isMinimized()
+        """
+        isMin = self.isMinimized()
+        if isMin and self.isVisible:
+            return
+        if not isMin:
+            self.setWindowState((self.windowState() & ~Qt.WindowActive)
+                                | Qt.WindowMinimized)
+        self.setVisible(True)
+
+    @property
+    def maximized(self):
+        """whether this widget is maximized
+
+        This property is only relevant for windows.
+
+        By default, this property is False.
+
+        :rtype: bool
+
+        .. seealso:: windowState(), showMaximized(), visible, show(), hide(),
+        showNormal(), minimized
+        """
+        return self.isMaximized()
+
+    def isMaximized(self):
+        return self.data.window_state & Qt.WindowMaximized
+
+    def windowState(self):
+        """ Returns the current window state. The window state is a OR'ed
+        combination of Qt.WindowState: Qt.WindowMinimized,
+        Qt.WindowMaximized, Qt.WindowFullScreen, and Qt.WindowActive.
+
+        .. seealso:: Qt.WindowState, setWindowState()
+        """
+        return Qt.WindowStates(self.data.window_state)
+
+    def _overrideWindowState(self, new_state):
+        # TODO: implement QWindowStateChangeEvent
+        raise NotImplementedError
+
+    def setWindowState(self, new_state):
+        raise NotImplementedError
+        old_state = self.window_state()
+        if old_state == new_state:
+            return
+
+    @property
+    def fullScreen(self):
+        """whether the widget is shown in full screen mode
+
+        A widget in full screen mode occupies the whole screen area and does not
+        display window decorations, such as a title bar.
+
+        By default, this property is False.
+
+        :rtype: bool
+
+        .. seealso:: windowState(), minimized, maximized
+        """
+        return self.isFullScreen()
+
+    def isFullScreen(self):
+        return self.data.window_state & Qt.WindowFullScreen
+
+    def showFullScreen(self):
+        """Shows the widget in full-screen mode.
+
+        Calling this function only affects windows.
+
+        To return from full-screen mode, call showNormal().
+
+        .. seealso:: showNormal(), showMaximized(), show(), hide(), isVisible()
+
+        """
+        self.setWindowState(
+            (self.windowState() & ~(Qt.WindowMinimized | Qt.WindowMaximized))
+            | Qt.WindowFullScreen
+        )
+        self.setVisible(True)
+
+    def showMaximized(self):
+        """Shows the widget maximized.
+
+        Calling this function only affects windows.
+
+        .. seealso:: setWindowState(), showNormal(), showMinimized(),
+        show(), hide(), isVisible()
+        """
+        self.setWindowState(
+            (self.windowState() & ~(Qt.WindowMinimized | Qt.WindowFullScreen))
+               | Qt.WindowMaximized
+        )
+        self.setVisible(True)
+
+    def showNormal(self):
+        """Restores the widget after it has been maximized or minimized.
+
+        Calling this function only affects windows.
+
+        .. seealso:: setWindowState(), showMinimized(), showMaximized(),
+        show(), hide(), isVisible()
+        """
+        self.setWindowState(self.windowState() & ~(Qt.WindowMinimized
+                                                 | Qt.WindowMaximized
+                                                 | Qt.WindowFullScreen)
+        )
+        self.setVisible(True)
+
+    def isEnabledTo(self, ancestor):
+        """Returns \c true if this widget would become enabled if  ancestor is
+        enabled; otherwise returns False.
+
+        This is the case if neither the widget itself nor every parent up
+        to but excluding ancestor has been explicitly disabled.
+
+        isEnabledTo(0) returns false if this widget or any if its ancestors
+        was explicitly disabled.
+
+        The word ancestor here means a parent widget within the same window.
+
+        Therefore isEnabledTo(0) stops at this widget's window, unlike
+        isEnabled() which also takes parent windows into considerations.
+
+        .. seealso:: setEnabled(), enabled
+        """
+        if not isinstance(ancestor, CWidget):
+            raise TypeError("ancestor must be a CWidget")
+        w = self
+        while (not w.testAttribute(Qt.WA_ForceDisabled)
+                and not w.isWindow()
+                and w.parentWidget()
+                and w.parentWidget() != ancestor):
+            w = w.parentWidget()
+        return not self.testAttribute(Qt.WA_ForceDisabled)
+
+    def addAction(self, action):
+        #TODO: implement CAction
+        raise NotImplementedError
+
+    def addActions(self, actions):
+        #TODO: implement CAction
+        raise NotImplementedError
+
+    def insertAction(self, action_before, action_after):
+        #TODO: implement CAction
+        raise NotImplementedError
+
+    def insertActions(self, actions_before, actions_after):
+        #TODO: implement CAction
+        raise NotImplementedError
+
+    def removeAction(self, action):
+        #TODO: implement CAction
+        raise NotImplementedError
+
+    def actions(self, action):
+        #TODO: implement CAction
+        raise NotImplementedError
 
     def setMinimumSize(self, minw, minh):
         self._minw, self._minh = minw, minh
+
+    def setMaximumSize(self, maxw, maxh):
+        self._maxw, self._maxh = maxw, maxh
 
     def resize(self, w, h):
         self._w, self._h = w, h
@@ -396,7 +494,14 @@ class CWidget(CObject):
     def setEnabled(self, enable):
         self._enable = enable
 
+    @multimethod(int, int)
     def childAt(self, x, y):
+        #TODO: 
+        self._childAt = self._win.findChild()
+        return self._childAt
+
+    @multimethod(core.CPoint)
+    def childAt(self, point):
         #TODO: 
         self._childAt = self._win.findChild()
         return self._childAt
@@ -732,11 +837,11 @@ class CLayoutItem(metaclass=abc.ABCMeta):
         ...
 
 
-class __CLayout(CObject):
+class __CLayout(core.CObject):
     __metaclass__ = CLayoutItem
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-    
+
 class CLayout(__CLayout):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -770,10 +875,10 @@ class CLayout(__CLayout):
     def controlTypes(self):
         if self.count() == 0:
             return CSizePolicy.DefaultType
-        types = CSizePolicy.ControlTypes
+        _types = CSizePolicy.ControlTypes
         for i in reversed(self.count()):
-            types |= self.itemAt(i).controlTypes()
-        return types
+            _types |= self.itemAt(i).controlTypes()
+        return _types
 
     def setGeometry(self, x, y, w, h):
         self._rect = (x, y, w, h)
@@ -833,7 +938,8 @@ class CLayout(__CLayout):
         child = lay.itemAt(i)
         while (child):
             if child.widget() == w:
-                del lay.takeAt(i)
+                item = lay.takeAt(i)
+                del item
                 lay.invalidate()
                 return True
             elif self.removeWidgetRecursively(child, w):
@@ -880,21 +986,21 @@ class CLayout(__CLayout):
 
 class CSizePolicy:
     class ControlType(Enum):
-        DefaultType	= 0x00000001 # The default type, when none is specified.
-        ButtonBox	= 0x00000002 # A QDialogButtonBox instance.
-        CheckBox	= 0x00000004 # A QCheckBox instance.
-        ComboBox	= 0x00000008 # A QComboBox instance.
-        Frame   	= 0x00000010 # A QFrame instance.
-        GroupBox	= 0x00000020 # A QGroupBox instance.
-        Label   	= 0x00000040 # A QLabel instance.
-        Line	    = 0x00000080 # A QFrame instance with QFrame::HLine or QFrame::VLine.
-        LineEdit	= 0x00000100 # A QLineEdit instance.
-        PushButton	= 0x00000200 # A QPushButton instance.
-        RadioButton	= 0x00000400 # A QRadioButton instance.
-        Slider	    = 0x00000800 # A QAbstractSlider instance.
-        SpinBox	    = 0x00001000 # A QAbstractSpinBox instance.
-        TabWidget	= 0x00002000 # A QTabWidget instance.
-        ToolButton	= 0x00004000 # A QToolButton instance.
+        DefaultType = 0x00000001 # The default type, when none is specified.
+        ButtonBox   = 0x00000002 # A QDialogButtonBox instance.
+        CheckBox    = 0x00000004 # A QCheckBox instance.
+        ComboBox    = 0x00000008 # A QComboBox instance.
+        Frame       = 0x00000010 # A QFrame instance.
+        GroupBox    = 0x00000020 # A QGroupBox instance.
+        Label       = 0x00000040 # A QLabel instance.
+        Line        = 0x00000080 # A QFrame instance with QFrame::HLine or QFrame::VLine.
+        LineEdit    = 0x00000100 # A QLineEdit instance.
+        PushButton  = 0x00000200 # A QPushButton instance.
+        RadioButton = 0x00000400 # A QRadioButton instance.
+        Slider      = 0x00000800 # A QAbstractSlider instance.
+        SpinBox     = 0x00001000 # A QAbstractSpinBox instance.
+        TabWidget   = 0x00002000 # A QTabWidget instance.
+        ToolButton  = 0x00004000 # A QToolButton instance.
 
 class CRect(): pass
 class Cpoint(): pass
